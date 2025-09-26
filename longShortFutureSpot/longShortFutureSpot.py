@@ -117,7 +117,7 @@ if __name__ == "__main__":
     strategyName = "longShortFutureSpot"
     version = "v1"
 
-    startDate = datetime(2024, 4, 1, 9, 15)
+    startDate = datetime(2020, 4, 1, 9, 15)
     endDate = datetime(2025, 9, 20, 15, 30)
 
     portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/Fno_173.md",10)
