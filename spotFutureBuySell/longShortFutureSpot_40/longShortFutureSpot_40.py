@@ -2,6 +2,7 @@ from backtestTools.algoLogic import baseAlgoLogic, equityOverNightAlgoLogic
 from backtestTools.util import createPortfolio, calculate_mtm
 from backtestTools.histData import getEquityBacktestData
 from backtestTools.util import setup_logger
+
 from termcolor import colored, cprint
 from datetime import datetime
 import multiprocessing
@@ -12,7 +13,7 @@ import talib
 
 class EquityFuture(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "longShortFutureSpot":
+        if self.strategyName != "longShortFutureSpot_40":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -48,9 +49,8 @@ class EquityFuture(baseAlgoLogic):
 
         df['rsi'] = talib.RSI(df['c'], timeperiod=14)
         df['prev_rsi'] = df['rsi'].shift(1)
-        df['shortSell'] = np.where((df['rsi'] < 50) & (df['rsi'].shift(1) >= 50), "shortSell", "")
-        df['LongBuy'] = np.where((df['rsi'] > 50) & (df['rsi'].shift(1) <= 50), "LongBuy", "")
-        df['norange'] = np.where((df['rsi'] > 60) | (df['rsi'] < 40), "norange", "")
+        df['shortSell'] = np.where((df['rsi'] < 40) & (df['prev_rsi'] >= 40), "shortSell", "")
+        df['LongBuy'] = np.where((df['rsi'] > 40) & (df['prev_rsi'] <= 40), "LongBuy", "")
 
         df.dropna(inplace=True)
         df.index = df.index + 33300
@@ -92,11 +92,11 @@ class EquityFuture(baseAlgoLogic):
                             stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
 
             if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty):
-                if ~(df.at[lastIndexTimeData, "norange"] == "norange") and (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
+                if (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
                     entry_price = df.at[lastIndexTimeData, "c"]
                     stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "SELL")
 
-                if ~(df.at[lastIndexTimeData, "norange"] == "norange") and (df.at[lastIndexTimeData, "LongBuy"] == "LongBuy"):
+                elif (df.at[lastIndexTimeData, "LongBuy"] == "LongBuy"):
                     entry_price = df.at[lastIndexTimeData, "c"]
                     stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY")
 
@@ -114,13 +114,13 @@ if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "NA"
-    strategyName = "longShortFutureSpot"
+    strategyName = "longShortFutureSpot_40"
     version = "v1"
 
     startDate = datetime(2020, 4, 1, 9, 15)
     endDate = datetime(2025, 9, 20, 15, 30)
 
-    portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/Fno_173.md",10)
+    portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/Fno_173.md", 5)
     # portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/test1.md",1)
     # portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/nifty50.md",2)
 

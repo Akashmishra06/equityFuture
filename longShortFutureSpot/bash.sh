@@ -1,2 +1,0 @@
-cd "/root/equityFuture/longShortFutureSpot"
-/usr/local/bin/pm2 start "longShortFutureSpot.py" --interpreter="/root/akashResearchAndDevelopment/..venv/bin/python3" --name="longShortFutureSpot-1-1" --no-autorestart --time
