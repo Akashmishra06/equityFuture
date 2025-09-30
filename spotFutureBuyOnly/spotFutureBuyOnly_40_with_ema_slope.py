@@ -50,7 +50,8 @@ class EquityFuture(baseAlgoLogic):
         df['rsi'] = talib.RSI(df['c'], timeperiod=14)
         df['prev_rsi'] = df['rsi'].shift(1)
         df['ema_10'] = talib.EMA(df['c'], timeperiod=10)
-        df['LongBuy'] = np.where((df['rsi'] > 40) & (df['prev_rsi'] <= 40) & (df['ema_10'] > df['ema_10'].shift(1)), "LongBuy", "")
+        df['prev_ema_10'] = df['ema_10'].shift(1)
+        df['LongBuy'] = np.where((df['rsi'] > 40) & (df['prev_rsi'] <= 40), "LongBuy", "")
         df['shortSell'] = np.where((df['rsi'] < 40) & (df['prev_rsi'] >= 40), "shortSell", "")
 
         df.dropna(inplace=True)
@@ -60,7 +61,7 @@ class EquityFuture(baseAlgoLogic):
 
         amountPerTrade = 10000000
         lastIndexTimeData = None
-        TrailingTrigger = False
+        EntryTrigger = False
 
         for timeData in df.index:
             stockAlgoLogic.timeData = timeData
@@ -78,9 +79,6 @@ class EquityFuture(baseAlgoLogic):
 
             stockAlgoLogic.pnlCalculator()
 
-            if (lastIndexTimeData in df.index) and df.at[lastIndexTimeData, "rsi"] > 70:
-                TrailingTrigger = True
-
             for index, row in stockAlgoLogic.openPnl.iterrows():
                 if lastIndexTimeData in df.index:
 
@@ -89,17 +87,19 @@ class EquityFuture(baseAlgoLogic):
                         if (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
                             exitType = "BUYEXIT"
                             stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
-
-                        elif TrailingTrigger and df.at[lastIndexTimeData, "rsi"] < 50 and row['EntryPrice'] < row['CurrentPrice']:
-                            exitType = "TrailingStoploss"
-                            stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
+                            EntryTrigger = False
 
             if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty):
 
+                if (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
+                    EntryTrigger = False
+
                 if (df.at[lastIndexTimeData, "LongBuy"] == "LongBuy"):
+                    EntryTrigger = True
+                if EntryTrigger and df.at[lastIndexTimeData, "ema_10"] > df.at[lastIndexTimeData, "prev_ema_10"]:
                     entry_price = df.at[lastIndexTimeData, "c"]
                     stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY")
-                    TrailingTrigger = False
+                    EntryTrigger = False
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()

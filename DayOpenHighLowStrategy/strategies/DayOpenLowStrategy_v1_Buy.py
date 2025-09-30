@@ -1,19 +1,21 @@
 from backtestTools.algoLogic import baseAlgoLogic, equityOverNightAlgoLogic
-from backtestTools.util import createPortfolio, calculate_mtm
 from backtestTools.histData import getEquityBacktestData
+from backtestTools.histData import getEquityHistData
 from backtestTools.util import setup_logger
-
+from datetime import datetime, time
 from termcolor import colored, cprint
-from datetime import datetime
 import multiprocessing
+import pandas as pd
 import numpy as np
 import logging
 import talib
 
 
-class EquityFuture(baseAlgoLogic):
+class DayOpenLowStrategy_v1_Buy(baseAlgoLogic):
+
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "spotFutureBuyOnly_40":
+
+        if self.strategyName != "DayOpenLowStrategy_v1_Buy":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -43,22 +45,34 @@ class EquityFuture(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getEquityBacktestData(stockName, startTimeEpoch-(84400*1000), endTimeEpoch, "D")
+            df = getEquityBacktestData(stockName, startTimeEpoch-(7776000*5), endTimeEpoch, "5Min")
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            df['time'] = df['datetime'].dt.strftime('%H:%M')
+            df['date'] = df['datetime'].dt.date
         except Exception as e:
             raise Exception(e)
+        
+        try:
+            df["ema5"] = talib.EMA(df["c"], timeperiod=5)
+            df.dropna(inplace=True)
+        except:
+            self.strategyLogger.info(f"Data not found for {stockName}")
+            return
 
-        df['rsi'] = talib.RSI(df['c'], timeperiod=14)
-        df['prev_rsi'] = df['rsi'].shift(1)
-        df['LongBuy'] = np.where((df['rsi'] > 40) & (df['prev_rsi'] <= 40), "LongBuy", "")
-        df['shortSell'] = np.where((df['rsi'] < 40) & (df['prev_rsi'] >= 40), "shortSell", "")
+        df['canTake'] = np.where(df['time'] == "09:15", "canTake", "")
 
         df.dropna(inplace=True)
-        df.index = df.index + 33300
+        df['EntryTrigger1'] = np.where(((df['o'] == df['l']) & (df['canTake'] == "canTake")), "EntryTrigger1", "")
+
+
         df = df[df.index > startTimeEpoch]
         df.to_csv(f"{self.fileDir['backtestResultsCandleData']}{stockName}_df.csv")
 
-        amountPerTrade = 10000000
+        amountPerTrade = 100000
         lastIndexTimeData = None
+        stoploss = None
+        entry_price = None
+        Dateoftime = None
 
         for timeData in df.index:
             stockAlgoLogic.timeData = timeData
@@ -70,7 +84,8 @@ class EquityFuture(baseAlgoLogic):
             if not stockAlgoLogic.openPnl.empty:
                 for index, row in stockAlgoLogic.openPnl.iterrows():
                     try:
-                        stockAlgoLogic.openPnl.at[index, 'CurrentPrice'] = df.at[lastIndexTimeData, "c"]
+                        data = getEquityHistData(row['Symbol'], timeData)
+                        stockAlgoLogic.openPnl.at[index, 'CurrentPrice'] = data['o']
                     except Exception as e:
                         logging.info(e)
 
@@ -79,46 +94,39 @@ class EquityFuture(baseAlgoLogic):
             for index, row in stockAlgoLogic.openPnl.iterrows():
                 if lastIndexTimeData in df.index:
 
-                    if row['PositionStatus'] == 1:
+                    if stockAlgoLogic.humanTime.time() >= time(15, 15):
 
-                        if (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
-                            exitType = "BUYEXIT"
-                            stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
+                        exitType = "Time Up"
+                        stockAlgoLogic.exitOrder(index, exitType)
 
-            if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty):
+                    elif row["PositionStatus"] == 1:
 
-                if (df.at[lastIndexTimeData, "LongBuy"] == "LongBuy"):
-                    entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY")
+                        if df.at[lastIndexTimeData, "l"] <= (row['stoploss']):
+
+                            exitType = "Stoploss Hit"
+                            stockAlgoLogic.exitOrder(index, exitType, (row['stoploss']))
+
+
+            if lastIndexTimeData is not None and (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() < time(15, 15)):
+
+                if (df.at[lastIndexTimeData, "EntryTrigger1"] == "EntryTrigger1"):
+
+                    entry_price = df.at[lastIndexTimeData, "h"]
+                    stoploss = df.at[lastIndexTimeData, "l"]
+
+
+                    Dateoftime = df.at[lastIndexTimeData, "date"]
+                if Dateoftime != df.at[lastIndexTimeData, "date"]:
+                    entry_price = None
+
+                if stoploss is not None and entry_price is not None and (entry_price < df.at[lastIndexTimeData, "h"]):
+
+                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY", {"stoploss":stoploss})
+                    entry_price = None
+
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()
 
         if not stockAlgoLogic.openPnl.empty:
-            for index, row in stockAlgoLogic.openPnl.iterrows():
-                exitType = "Time Up"
-                stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
-        stockAlgoLogic.pnlCalculator()
-
-
-if __name__ == "__main__":
-    startNow = datetime.now()
-
-    devName = "NA"
-    strategyName = "spotFutureBuyOnly_40"
-    version = "v1"
-
-    startDate = datetime(2020, 4, 1, 9, 15)
-    endDate = datetime(2025, 9, 20, 15, 30)
-
-    portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/Fno_173.md", 5)
-    # portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/test1.md",1)
-    # portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/nifty50.md",2)
-
-    algoLogicObj = EquityFuture(devName, strategyName, version)
-    fileDir, closedPnl = algoLogicObj.runBacktest(portfolio, startDate, endDate)
-
-    dailyReport = calculate_mtm(closedPnl, fileDir, timeFrame="15T", mtm=True, equityMarket=True)
-
-    endNow = datetime.now()
-    print(f"Done. Ended in {endNow-startNow}")
+            print("RuntimeError")

@@ -1,10 +1,10 @@
 from backtestTools.algoLogic import baseAlgoLogic, equityOverNightAlgoLogic
 from backtestTools.util import createPortfolio, calculate_mtm
-from backtestTools.histData import getEquityBacktestData
+from backtestTools.histData import getEquityBacktestData, getFnoBacktestData
 from backtestTools.util import setup_logger
 
 from termcolor import colored, cprint
-from datetime import datetime
+from datetime import datetime, time
 import multiprocessing
 import numpy as np
 import logging
@@ -13,7 +13,7 @@ import talib
 
 class EquityFuture(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "spotFutureBuyOnly_40":
+        if self.strategyName != "check":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -43,21 +43,21 @@ class EquityFuture(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getEquityBacktestData(stockName, startTimeEpoch-(84400*1000), endTimeEpoch, "D")
+            df = getFnoBacktestData("NIFTY 50", startTimeEpoch-(84400*1000), endTimeEpoch, "15Min")
         except Exception as e:
             raise Exception(e)
 
-        df['rsi'] = talib.RSI(df['c'], timeperiod=14)
-        df['prev_rsi'] = df['rsi'].shift(1)
-        df['LongBuy'] = np.where((df['rsi'] > 40) & (df['prev_rsi'] <= 40), "LongBuy", "")
-        df['shortSell'] = np.where((df['rsi'] < 40) & (df['prev_rsi'] >= 40), "shortSell", "")
+        # df['rsi'] = talib.RSI(df['c'], timeperiod=14)
+        # df['prev_rsi'] = df['rsi'].shift(1)
+        # df['LongBuy'] = np.where((df['rsi'] > 40) & (df['prev_rsi'] <= 40), "LongBuy", "")
+        # df['shortSell'] = np.where((df['rsi'] < 40) & (df['prev_rsi'] >= 40), "shortSell", "")
 
         df.dropna(inplace=True)
-        df.index = df.index + 33300
+        # df.index = df.index + 33300
         df = df[df.index > startTimeEpoch]
         df.to_csv(f"{self.fileDir['backtestResultsCandleData']}{stockName}_df.csv")
 
-        amountPerTrade = 10000000
+        amountPerTrade = 100000
         lastIndexTimeData = None
 
         for timeData in df.index:
@@ -78,18 +78,17 @@ class EquityFuture(baseAlgoLogic):
 
             for index, row in stockAlgoLogic.openPnl.iterrows():
                 if lastIndexTimeData in df.index:
-
-                    if row['PositionStatus'] == 1:
-
-                        if (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
-                            exitType = "BUYEXIT"
-                            stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
+                    if stockAlgoLogic.humanTime.time() >= time(15,15):
+                        exitType = "BUYEXIT"
+                        stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
+                    if (row['EntryPrice']*1.01) < df.at[lastIndexTimeData, "c"]:
+                        exitType = "stoploss"
+                        stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
 
             if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty):
 
-                if (df.at[lastIndexTimeData, "LongBuy"] == "LongBuy"):
-                    entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY")
+                    entry_price = df.at[lastIndexTimeData, "o"]
+                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "SELL")
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()
@@ -105,10 +104,10 @@ if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "NA"
-    strategyName = "spotFutureBuyOnly_40"
+    strategyName = "check"
     version = "v1"
 
-    startDate = datetime(2020, 4, 1, 9, 15)
+    startDate = datetime(2025, 1, 1, 9, 15)
     endDate = datetime(2025, 9, 20, 15, 30)
 
     portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/Fno_173.md", 5)
