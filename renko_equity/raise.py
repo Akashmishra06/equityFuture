@@ -98,16 +98,27 @@ class algoLogic(optIntraDayAlgoLogic):
 
                     if self.humanTime.time() >= time(15, 15):
                         exitType = "timeUp"
-                        self.exitOrder(index, exitType)
+                        self.exitOrder(index, exitType, df.at[lastindextimeData[1], "c"])
+
+                    elif row['PositionStatus'] == 1:
+                        if df.at[lastindextimeData_r[1], "c"] < df.at[lastindextimeData_r[1], "o"]:
+                            exitType = "longExit"
+                            self.exitOrder(index, exitType, df.at[lastindextimeData[1], "c"])
+
+                    elif row['PositionStatus'] == -1:
+                        if df.at[lastindextimeData_r[1], "c"] > df.at[lastindextimeData_r[1], "o"]:
+                            exitType = "shortExit"
+                            self.exitOrder(index, exitType, df.at[lastindextimeData[1], "c"])
 
             if self.openPnl.empty and current_renko_value == +1 and putTradeCounter < 3:
                 if df.at[lastindextimeData_r[1], "c"] > df.at[lastindextimeData_r[1], "o"]:
                     entryPrice = df.at[lastindextimeData[1], "c"]
-                    self.entryOrder(entryPrice, baseSym, 100000//entryPrice, "BUY")
-                
+                    self.entryOrder(entryPrice, baseSym, 100000//entryPrice, "BUY", {"lenRenko": len(df_renko)})
+
                 elif df.at[lastindextimeData_r[1], "c"] < df.at[lastindextimeData_r[1], "o"]:
                     entryPrice = df.at[lastindextimeData[1], "c"]
-                    self.entryOrder(entryPrice, baseSym, 100000//entryPrice, "SELL")
+                    self.entryOrder(entryPrice, baseSym, 100000//entryPrice, "SELL", {"lenRenko": len(df_renko)})
+                    # print(len(df_renko))
 
                 self.strategyLogger.info(f"Datetime:{self.humanTime}\tOpen:{df.at[lastindextimeData[1],'o']}\tHigh:{df.at[lastindextimeData[1],'h']}\tLow:{df.at[lastindextimeData[1],'l']}\tClose:{df.at[lastindextimeData[1],'c']}\t\tRenko: {current_renko_value}\tEntry:\tTradeCountPE:{putTradeCounter}\n")
             previous_renko = current_renko_value
@@ -125,7 +136,7 @@ if __name__ == "__main__":
     strategyName = "Renko"
     version = "v1"
 
-    startDate = datetime(2025, 1, 1, 9, 15)
+    startDate = datetime(2018, 1, 1, 9, 15)
     endDate = datetime(2025, 9, 30, 15, 30)
 
     algo = algoLogic(devName, strategyName, version)
