@@ -1,19 +1,19 @@
+from backtestTools.util import createPortfolio, calculate_mtm, setup_logger
 from backtestTools.algoLogic import baseAlgoLogic, equityOverNightAlgoLogic
-from backtestTools.util import createPortfolio, calculate_mtm
 from backtestTools.histData import getEquityBacktestData
-from backtestTools.util import setup_logger
+from backtestTools.histData import getFnoBacktestData
+from backtestTools.expiry import getExpiryData
 
 from termcolor import colored, cprint
-from datetime import datetime
+from datetime import datetime, time
 import multiprocessing
 import numpy as np
 import logging
 import talib
 
-
-class EquityFuture(baseAlgoLogic):
+class FDRS_Single_Confermation_RSI_3(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "spotFutureBuyOnly_40_with_ema_slope":
+        if self.strategyName != "FDRS_Single_Confermation_RSI_3":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -43,25 +43,26 @@ class EquityFuture(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getEquityBacktestData(stockName, startTimeEpoch-(84400*1000), endTimeEpoch, "D")
+            df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "1H")
         except Exception as e:
             raise Exception(e)
 
-        df['rsi'] = talib.RSI(df['c'], timeperiod=14)
-        df['prev_rsi'] = df['rsi'].shift(1)
-        df['ema_10'] = talib.EMA(df['c'], timeperiod=10)
-        df['prev_ema_10'] = df['ema_10'].shift(1)
-        df['LongBuy'] = np.where((df['rsi'] > 40) & (df['prev_rsi'] <= 40), "LongBuy", "")
-        df['shortSell'] = np.where((df['rsi'] < 40) & (df['prev_rsi'] >= 40), "shortSell", "")
+        df['rsi'] = talib.RSI(df['c'], timeperiod=3)
+        
+        # df['prev_rsi'] = df['rsi'].shift(1)
+        # df['longEntry'] = np.where((df['rsi'] > 70) & (df['prev_rsi'] < 70), "longEntry", "")
+        # df['longExit'] = np.where((df['prev_rsi'] > 30) & (df['rsi'] < 30), "longExit", "")
+
+        df['longEntry'] = np.where((df['rsi'] > 70), "longEntry", "")
+        df['longExit'] = np.where((df['rsi'] < 30), "longExit", "")
 
         df.dropna(inplace=True)
-        df.index = df.index + 33300
+        # df.index = df.index + 33300
         df = df[df.index > startTimeEpoch]
         df.to_csv(f"{self.fileDir['backtestResultsCandleData']}{stockName}_df.csv")
 
-        amountPerTrade = 10000000
+        amountPerTrade = 100000
         lastIndexTimeData = None
-        EntryTrigger = False
 
         for timeData in df.index:
             stockAlgoLogic.timeData = timeData
@@ -80,26 +81,33 @@ class EquityFuture(baseAlgoLogic):
             stockAlgoLogic.pnlCalculator()
 
             for index, row in stockAlgoLogic.openPnl.iterrows():
-                if lastIndexTimeData in df.index:
+                if lastIndexTimeData in df.index and (stockAlgoLogic.humanTime.time() > time(9, 15)):
 
                     if row['PositionStatus'] == 1:
 
-                        if (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
-                            exitType = "BUYEXIT"
+                        if (df.at[lastIndexTimeData, "longExit"] == "longExit"):
+                            exitType = "rsiBuyExit"
                             stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
-                            EntryTrigger = False
 
-            if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty):
+                    elif row['PositionStatus'] == -1:
 
-                if (df.at[lastIndexTimeData, "shortSell"] == "shortSell"):
-                    EntryTrigger = False
+                        if (df.at[lastIndexTimeData, "longEntry"] == "longEntry"):
+                            exitType = "rsiSellExit"
+                            stockAlgoLogic.exitOrder(index, exitType, (df.at[lastIndexTimeData, "c"]))
 
-                if (df.at[lastIndexTimeData, "LongBuy"] == "LongBuy"):
-                    EntryTrigger = True
-                if EntryTrigger and df.at[lastIndexTimeData, "ema_10"] > df.at[lastIndexTimeData, "prev_ema_10"]:
+            if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() > time(9, 15)):
+                if stockName == "NIFTY 50":
+                    lotSize = 75
+                elif stockName == "NIFTY BANK":
+                    lotSize = 30
+                    
+                if (df.at[lastIndexTimeData, "longEntry"] == "longEntry"):
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY")
-                    EntryTrigger = False
+                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "BUY")
+
+                elif (df.at[lastIndexTimeData, "longExit"] == "longExit"):
+                    entry_price = df.at[lastIndexTimeData, "c"]
+                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "SELL")
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()
@@ -115,17 +123,15 @@ if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "NA"
-    strategyName = "spotFutureBuyOnly_40_with_ema_slope"
+    strategyName = "FDRS_Single_Confermation_RSI_3"
     version = "v1"
 
     startDate = datetime(2020, 4, 1, 9, 15)
-    endDate = datetime(2025, 9, 20, 15, 30)
+    endDate = datetime(2025, 9, 30, 15, 30)
 
-    portfolio = createPortfolio("/root/development/equityFuture/stocksList/test1.md", 5)
-    # portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/test1.md",1)
-    # portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/nifty50.md",2)
+    portfolio = createPortfolio("/root/development/equityFuture/FDRS/index.md", 1)
 
-    algoLogicObj = EquityFuture(devName, strategyName, version)
+    algoLogicObj = FDRS_Single_Confermation_RSI_3(devName, strategyName, version)
     fileDir, closedPnl = algoLogicObj.runBacktest(portfolio, startDate, endDate)
 
     dailyReport = calculate_mtm(closedPnl, fileDir, timeFrame="15T", mtm=True, equityMarket=True)
