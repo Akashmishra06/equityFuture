@@ -12,9 +12,10 @@ import pandas as pd
 import logging
 import talib
 
+
 class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "base_withreversal":
+        if self.strategyName != "intradayFuture_rsi_7_reversal":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -47,11 +48,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
             df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "15Min")
         except Exception as e:
             raise Exception(e)
-        
-        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-            print(f"❌ No data for {stockName} — skipping this process")
-            return
-        
+
         df['rsi'] = talib.RSI(df['c'], timeperiod=7)
         df['longEntry'] = np.where((df['rsi'] > 70), "longEntry", "")
         df['longExit'] = np.where((df['rsi'] < 30), "longExit", "")
@@ -64,7 +61,6 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
         df = df[df.index > startTimeEpoch]
         df.to_csv(f"{self.fileDir['backtestResultsCandleData']}{stockName}_df.csv")
 
-        amountPerTrade = 100000
         lastIndexTimeData = None
         DayFirstEntry = False
         secondEntry = False
@@ -127,7 +123,6 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                     except Exception as e:
                         logging.info(e)
 
-
             if DayFirstEntry == True and stockAlgoLogic.humanTime.time() >= time(15, 15):
                 DayFirstEntry = False
 
@@ -142,7 +137,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                             exitType = f"AllExit,{row['entryType']}"
                             stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "BUY", {"entryType":"two"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "BUY", {"entryType":"two"})
                     DayFirstEntry = True
 
                 if (df.at[lastIndexTimeData, "shortreversal"] == "shortreversal") and (df.at[lastIndexTimeData, "c"] < df.at[lastIndexTimeData, "o"]):
@@ -152,7 +147,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                             exitType = f"AllExit,{row['entryType']}"
                             stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "SELL", {"entryType":"two"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "SELL", {"entryType":"two"})
                     DayFirstEntry = True
 
             if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() > time(9, 30)) & (stockAlgoLogic.humanTime.time() < time(15, 15)):
@@ -183,13 +178,13 @@ if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "AM"
-    strategyName = "base_withreversal"
+    strategyName = "intradayFuture_rsi_7_reversal"
     version = "v1"
 
     startDate = datetime(2020, 4, 1, 9, 15)
     endDate = datetime(2025, 9, 30, 15, 30)
 
-    portfolio = createPortfolio("/root/development/equityFuture/intraday_15Min_rsi_5_reversal/stocksTwo.md", 1)
+    portfolio = createPortfolio("/root/development/equityFuture/FuturesAndOptions/index.md", 1)
 
     algoLogicObj = FDRS_Single_Confermation_RSI_5(devName, strategyName, version)
     fileDir, closedPnl = algoLogicObj.runBacktest(portfolio, startDate, endDate)

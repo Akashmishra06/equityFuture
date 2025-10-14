@@ -44,14 +44,12 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "15Min")
+            df = getEquityBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "15Min")
         except Exception as e:
             raise Exception(e)
-        
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
             print(f"❌ No data for {stockName} — skipping this process")
             return
-        
         df['rsi'] = talib.RSI(df['c'], timeperiod=7)
         df['longEntry'] = np.where((df['rsi'] > 70), "longEntry", "")
         df['longExit'] = np.where((df['rsi'] < 30), "longExit", "")
@@ -163,11 +161,11 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
 
                 if (df.at[lastIndexTimeData, "longEntry"] == "longEntry") and (df.at[lastIndexTimeData, "c"] > df.at[lastIndexTimeData, "o"]):
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "BUY", {"entryType":"one"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "BUY", {"entryType":"one"})
 
                 elif (df.at[lastIndexTimeData, "longExit"] == "longExit") and (df.at[lastIndexTimeData, "c"] < df.at[lastIndexTimeData, "o"]):
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "SELL", {"entryType":"one"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "SELL", {"entryType":"one"})
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()

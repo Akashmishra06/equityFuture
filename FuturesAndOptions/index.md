@@ -1,5 +1,4 @@
 NIFTY 50
-NIFTY BANK
 a
 a
 a
