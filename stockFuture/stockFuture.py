@@ -45,7 +45,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "15Min")
+            df = getEquityBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "15Min")
         except Exception as e:
             raise Exception(e)
 
@@ -64,6 +64,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
         lastIndexTimeData = None
         DayFirstEntry = False
         secondEntry = False
+        amountPerTrade = 1000000
 
         for timeData in df.index:
             stockAlgoLogic.timeData = timeData
@@ -78,7 +79,6 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                         stockAlgoLogic.openPnl.at[index, 'CurrentPrice'] = df.at[lastIndexTimeData, "c"]
                     except Exception as e:
                         logging.info(e)
-
             stockAlgoLogic.pnlCalculator()
 
             if lastIndexTimeData in df.index and not stockAlgoLogic.openPnl.empty:
@@ -100,7 +100,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                                 exitType = f"reversallongExit,{row['entryType']}"
                                 stockAlgoLogic.exitOrder(index, exitType, current_close)
 
-                            elif (row['EntryPrice'] * 0.997) > current_close:
+                            elif (row['EntryPrice'] * 0.995) > current_close:
                                 exitType = f"BuyStopLoss,{row['entryType']}"
                                 stockAlgoLogic.exitOrder(index, exitType, current_close)
 
@@ -113,7 +113,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                                 exitType = f"reversalshortExit,{row['entryType']}"
                                 stockAlgoLogic.exitOrder(index, exitType, current_close)
 
-                            elif (row['EntryPrice'] * 1.003) < current_close:
+                            elif (row['EntryPrice'] * 1.005) < current_close:
                                 exitType = f"SELLStopLoss,{row['entryType']}"
                                 stockAlgoLogic.exitOrder(index, exitType, current_close)
 
@@ -124,8 +124,6 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                 DayFirstEntry = False
 
             if DayFirstEntry == False and (lastIndexTimeData in df.index) & (stockAlgoLogic.humanTime.time() > time(9, 30)) & (stockAlgoLogic.humanTime.time() < time(15, 15)):
-                if stockName == "NIFTY 50":
-                    lotSize = 75
 
                 if (df.at[lastIndexTimeData, "longreversal"] == "longreversal") and (df.at[lastIndexTimeData, "c"] > df.at[lastIndexTimeData, "o"]):
 
@@ -134,7 +132,7 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                             exitType = f"AllExit,{row['entryType']}"
                             stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "BUY", {"entryType":"two"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "BUY", {"entryType":"two"})
                     DayFirstEntry = True
 
                 if (df.at[lastIndexTimeData, "shortreversal"] == "shortreversal") and (df.at[lastIndexTimeData, "c"] < df.at[lastIndexTimeData, "o"]):
@@ -144,22 +142,18 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                             exitType = f"AllExit,{row['entryType']}"
                             stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "SELL", {"entryType":"two"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "SELL", {"entryType":"two"})
                     DayFirstEntry = True
 
             if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() > time(9, 30)) & (stockAlgoLogic.humanTime.time() < time(15, 15)):
-                if stockName == "NIFTY 50":
-                    lotSize = 75
-                elif stockName == "NIFTY BANK":
-                    lotSize = 30
 
                 if (df.at[lastIndexTimeData, "longEntry"] == "longEntry") and (df.at[lastIndexTimeData, "c"] > df.at[lastIndexTimeData, "o"]):
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "BUY", {"entryType":"one"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "BUY", {"entryType":"one"})
 
                 elif (df.at[lastIndexTimeData, "longExit"] == "longExit") and (df.at[lastIndexTimeData, "c"] < df.at[lastIndexTimeData, "o"]):
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "SELL", {"entryType":"one"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, amountPerTrade//entry_price, "SELL", {"entryType":"one"})
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()
@@ -181,7 +175,7 @@ if __name__ == "__main__":
     startDate = datetime(2020, 4, 1, 9, 15)
     endDate = datetime(2025, 9, 30, 15, 30)
 
-    portfolio = createPortfolio("/root/development/equityFuture/FuturesAndOptions/index.md", 1)
+    portfolio = createPortfolio("/root/development/equityFuture/stockFuture/stocks.md", 1)
 
     algoLogicObj = FDRS_Single_Confermation_RSI_5(devName, strategyName, version)
     fileDir, closedPnl = algoLogicObj.runBacktest(portfolio, startDate, endDate)

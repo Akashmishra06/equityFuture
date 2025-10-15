@@ -15,7 +15,7 @@ import talib
 
 class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "intradayFuture_rsi_5_reversal":
+        if self.strategyName != "fiveMinutes_rsi_7":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -45,11 +45,11 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "15Min")
+            df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "5Min")
         except Exception as e:
             raise Exception(e)
 
-        df['rsi'] = talib.RSI(df['c'], timeperiod=5)
+        df['rsi'] = talib.RSI(df['c'], timeperiod=7)
         df['longEntry'] = np.where((df['rsi'] > 70), "longEntry", "")
         df['longExit'] = np.where((df['rsi'] < 30), "longExit", "")
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "AM"
-    strategyName = "intradayFuture_rsi_5_reversal"
+    strategyName = "fiveMinutes_rsi_7"
     version = "v1"
 
     startDate = datetime(2020, 4, 1, 9, 15)

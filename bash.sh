@@ -1,2 +1,2 @@
-cd "/root/development/equityFuture/FuturesAndOptions"
-/usr/local/bin/pm2 start "againstOption.py" --interpreter="/root/development/AkashLiveAlgosBacktests/venv/bin/python3" --name="againstOption-1-1" --no-autorestart --time
+cd "/root/development/equityFuture/nifty_Buy"
+/usr/local/bin/pm2 start "main.py" --interpreter="/root/development/akashEquityBacktestAlgos/myenv/bin/python3" --name="main-1-1" --no-autorestart --time

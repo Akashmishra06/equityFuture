@@ -1,10 +1,10 @@
+from backtestTools.expiry import getExpiryData, connectToMongo
+from backtestTools.algoLogic import optOverNightAlgoLogic
+from backtestTools.histData import getFnoBacktestData
+from backtestTools.util import calculate_mtm
+from datetime import datetime, time
 import numpy as np
 import talib as ta
-from backtestTools.expiry import getExpiryData, connectToMongo
-from datetime import datetime, time
-from backtestTools.algoLogic import optOverNightAlgoLogic
-from backtestTools.util import calculate_mtm
-from backtestTools.histData import getFnoBacktestData
 
 
 class algoLogic(optOverNightAlgoLogic):
@@ -36,33 +36,28 @@ class algoLogic(optOverNightAlgoLogic):
         df_15Min.dropna(inplace=True)
 
         df_15Min['rsi'] = ta.RSI(df_15Min['c'], timeperiod=7)
+        df['rsi'] = ta.RSI(df['c'], timeperiod=7)
 
-        df_15Min['callSlope'] = np.where((df_15Min['rsi'] < df_15Min['rsi'].shift(1)) & (df_15Min['o'] > df_15Min['c']), "callSlope","")
-        df_15Min['putSlope'] = np.where((df_15Min['rsi'] > df_15Min['rsi'].shift(1)) & (df_15Min['o'] < df_15Min['c']), "putSlope","")
+        df_15Min['callEntryTypeOne'] = np.where((df_15Min['rsi'] > 70) & (df_15Min['c'] > df_15Min['o']), "callEntryTypeOne", "")
+        df_15Min['putEntryTypeOne'] = np.where((df_15Min['rsi'] < 30) & (df_15Min['c'] < df_15Min['o']), "putEntryTypeOne", "")
 
-        df_15Min['longEntry'] = np.where((df_15Min['rsi'] > 70), "longEntry", "")
-        df_15Min['longExit'] = np.where((df_15Min['rsi'] < 30), "longExit", "")
-
-        df_15Min['longreversal'] = np.where((df_15Min['rsi'] > 30) & (df_15Min['rsi'].shift(1) < 30), "longreversal", "")
-        df_15Min['shortreversal'] = np.where((df_15Min['rsi'] < 70) & (df_15Min['rsi'].shift(1) > 70), "shortreversal", "")
+        df_15Min['callEntryTypeTwo'] = np.where((df_15Min['rsi'] > 30) & (df_15Min['rsi'].shift(1) < 30) & (df_15Min['c'] > df_15Min['o']), "callEntryTypeTwo", "")
+        df_15Min['putEntryTypeTwo'] = np.where((df_15Min['rsi'] < 70) & (df_15Min['rsi'].shift(1) > 70) & (df_15Min['c'] < df_15Min['o']), "putEntryTypeTwo", "")
 
         df.to_csv(f"{self.fileDir['backtestResultsCandleData']}{indexName}_1Min.csv")
         df_15Min.to_csv(f"{self.fileDir['backtestResultsCandleData']}{indexName}_df_15Min.csv")
 
         lastIndexTimeData = [0, 0]
         lastdf15MinIndexTimeData = [0, 0]
-        
+
         MonthlyExpiry = getExpiryData(startEpoch, baseSym)['MonthLast']
         expiryDatetime = datetime.strptime(MonthlyExpiry, "%d%b%y").replace(hour=15, minute=20)
         expiryEpoch= expiryDatetime.timestamp()
         lotSize = int(getExpiryData(self.timeData, baseSym)["LotSize"])
+        oneeExpiry = getExpiryData(self.timeData+86400, baseSym)['CurrentExpiry']
 
-        callZone = False
-        putZone = False
-
-        callReversal = False
-        putReversal = False
         DayFirstEntry = False
+        reFalse = False
 
         for timeData in df.index:
             lastIndexTimeData.pop(0)
@@ -94,8 +89,21 @@ class algoLogic(optOverNightAlgoLogic):
 
             if self.humanTime.date() >= expiryDatetime.date():
                 MonthlyExpiry = getExpiryData(self.timeData+86400, baseSym)['MonthLast']
+                oneeExpiry = getExpiryData(self.timeData+86400, baseSym)['CurrentExpiry']
+                print(MonthlyExpiry, oneeExpiry)
+                if MonthlyExpiry == oneeExpiry:
+                    MonthlyExpiry = getExpiryData(self.timeData+86400*7, baseSym)['MonthLast']
+
                 expiryDatetime = datetime.strptime(MonthlyExpiry, "%d%b%y").replace(hour=15, minute=20)
                 expiryEpoch= expiryDatetime.timestamp()
+
+            if self.humanTime.time() == time(9, 30):
+                oneeExpiry = getExpiryData(self.timeData+86400, baseSym)['CurrentExpiry']
+                if MonthlyExpiry == oneeExpiry:
+                    MonthlyExpiry = getExpiryData(self.timeData+86400*7, baseSym)['MonthLast']
+
+            expiryDatetime = datetime.strptime(MonthlyExpiry, "%d%b%y").replace(hour=15, minute=20)
+            expiryEpoch= expiryDatetime.timestamp()
 
             if not self.openPnl.empty:
                 for index, row in self.openPnl.iterrows():
@@ -103,145 +111,112 @@ class algoLogic(optOverNightAlgoLogic):
                     symbol = row["Symbol"]
                     symSide = symbol[-2:]
 
-                    if row["CurrentPrice"] <= row["Target"]:
+                    if self.humanTime.time() >= time(15, 15):
+                        exitType = "TimeUp"
+                        self.exitOrder(index, exitType)
+
+                    elif row["CurrentPrice"] <= row["Target"]:
                         exitType = "Target Hit"
                         self.exitOrder(index, exitType, row["CurrentPrice"])
 
                     elif row["CurrentPrice"] >= row["Stoploss"]:
-                        exitType = "Stoploss Hit"
+                        exitType = "StoplossHit"
                         self.exitOrder(index, exitType, row["CurrentPrice"])
 
-                    elif self.humanTime.time() > time(15, 15):
-                        exitType = "TimeUp"
-                        self.exitOrder(index, exitType)
+                    elif ((timeData-900) in df_15Min.index) and not self.openPnl.empty:
 
-                    if ((timeData-900) in df_15Min.index) and not self.openPnl.empty:
-                        if symSide == "CE":
-                            if (df_15Min.at[lastdf15MinIndexTimeData[1], "longExit"] == "longExit"):
-                                exitType = "CE-exit"
-                                self.exitOrder(index, exitType)
+                        if symSide == "PE":
 
-                            if (df_15Min.at[lastdf15MinIndexTimeData[1], "longreversal"] == "longreversal"):
-                                exitType = "longreversal-exit-CE"
-                                self.exitOrder(index, exitType)
-
-                            if (df_15Min.at[lastdf15MinIndexTimeData[1], "rsi"] > 70):
+                            if (df.at[lastIndexTimeData[1], "rsi"] > 70):
                                 exitType = "callReversal-exit-CE"
                                 self.exitOrder(index, exitType)
-                                callReversal = False
 
-                        elif symSide == "PE":
-                            if (df_15Min.at[lastdf15MinIndexTimeData[1], "longEntry"] == "longEntry"):
-                                exitType = "PE-exit"
+                            if reFalse == False and (df_15Min.at[lastdf15MinIndexTimeData[1], "callEntryTypeTwo"] == "callEntryTypeTwo"):
+                                exitType = "putEntryTypeTwo-exit-CE"
                                 self.exitOrder(index, exitType)
 
-                            if (df_15Min.at[lastdf15MinIndexTimeData[1], "shortreversal"] == "shortreversal"):
-                                exitType = "shortreversal-exit-PE"
+                        elif symSide == "CE":
+
+                            if reFalse == False and (df_15Min.at[lastdf15MinIndexTimeData[1], "putEntryTypeTwo"] == "putEntryTypeTwo"):
+                                exitType = "callEntryTypeTwo-exit-PE"
                                 self.exitOrder(index, exitType)
 
-                            if (df_15Min.at[lastdf15MinIndexTimeData[1], "rsi"] < 30):
+                            elif (df.at[lastIndexTimeData[1], "rsi"] < 30):
                                 exitType = "putReversal-exit-PE"
                                 self.exitOrder(index, exitType)
-                                putReversal = False
 
-
-            if DayFirstEntry == True and self.humanTime.time() >= time(15, 15):
+            if self.humanTime.time() >= time(15, 15):
                 DayFirstEntry = False
+                reFalse = False
 
-            if DayFirstEntry == False and ((timeData-900) in df_15Min.index) & (self.humanTime.time() > time(9, 30)) & (self.humanTime.time() < time(15, 15)) and not self.openPnl.empty:
+            if self.humanTime.time() > time(9, 30) and self.humanTime.time() < time(15, 15) and reFalse == False and DayFirstEntry == True and ((timeData-900) in df_15Min.index) and self.openPnl.empty:
 
-                if (df_15Min.at[lastdf15MinIndexTimeData[1], "longreversal"] == "longreversal"):
+                if (df_15Min.at[lastdf15MinIndexTimeData[1], "callEntryTypeTwo"] == "callEntryTypeTwo"):
 
                     expiryEpoch = self.getCurrentExpiryEpoch(self.timeData, baseSym)
-
                     lotSize = int(getExpiryData(self.timeData, baseSym)["LotSize"])
 
                     try:
-                        putSym = self.getPutSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
+                        putSym = self.getCallSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
                         data = self.fetchAndCacheFnoHistData(putSym, lastIndexTimeData[1],conn=conn)
                     except Exception as e:
                         self.strategyLogger.info(e)
 
                     target = 0.3 * data["c"]
-                    stoploss = 1.5 * data["c"]
-
-                    putReversal = True
-
+                    stoploss = 1.3 * data["c"]
                     self.entryOrder(data["c"], putSym, lotSize, "SELL", {"Expiry": expiryEpoch,"Target": target,"Stoploss": stoploss,})
+                    DayFirstEntry = False
+                    reFalse = True
 
-                if (df_15Min.at[lastdf15MinIndexTimeData[1], "shortreversal"] == "shortreversal"):
+                if (df_15Min.at[lastdf15MinIndexTimeData[1], "putEntryTypeTwo"] == "putEntryTypeTwo"):
 
                     expiryEpoch = self.getCurrentExpiryEpoch(self.timeData, baseSym)
-
                     lotSize = int(getExpiryData(self.timeData, baseSym)["LotSize"])
 
                     try:
-                        callSym = self.getCallSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
+                        callSym = self.getPutSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
                         data = self.fetchAndCacheFnoHistData(callSym, lastIndexTimeData[1],conn=conn)
                     except Exception as e:
                         self.strategyLogger.info(e)
 
                     target = 0.3 * data["c"]
-                    stoploss = 1.5 * data["c"]
-
-                    callReversal = True
-
+                    stoploss = 1.3 * data["c"]
                     self.entryOrder(data["c"], callSym, lotSize, "SELL", {"Expiry": expiryEpoch,"Target": target,"Stoploss": stoploss,})
+                    DayFirstEntry = False
+                    reFalse = True
 
+            if self.humanTime.time() > time(9, 30) and self.humanTime.time() < time(15, 15) and ((timeData-900) in df_15Min.index) and self.openPnl.empty:
 
-
-            if ((timeData-900) in df_15Min.index) and (self.humanTime.time() < time(15, 15)) and (self.humanTime.time() >= time(9, 16)):
-                if (df_15Min.at[lastdf15MinIndexTimeData[1], "longEntry"] == "longEntry"):
-                    callZone = True
-                    putZone = False
-
-                if (df_15Min.at[lastdf15MinIndexTimeData[1], "longExit"] == "longExit"):
-                    callZone = False
-                    putZone = True
-
-            if ((timeData-900) in df_15Min.index) and self.openPnl.empty:
-                if putZone and (df_15Min.at[lastdf15MinIndexTimeData[1], "callSlope"] == "callSlope"):
+                if (df_15Min.at[lastdf15MinIndexTimeData[1], "callEntryTypeOne"] == "callEntryTypeOne"):
 
                     expiryEpoch = self.getCurrentExpiryEpoch(self.timeData, baseSym)
-
                     lotSize = int(getExpiryData(self.timeData, baseSym)["LotSize"])
 
                     try:
-                        putSym = self.getPutSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
+                        putSym = self.getCallSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
                         data = self.fetchAndCacheFnoHistData(putSym, lastIndexTimeData[1],conn=conn)
                     except Exception as e:
                         self.strategyLogger.info(e)
 
                     target = 0.3 * data["c"]
-                    stoploss = 1.5 * data["c"]
-
+                    stoploss = 1.3 * data["c"]
                     self.entryOrder(data["c"], putSym, lotSize, "SELL", {"Expiry": expiryEpoch,"Target": target,"Stoploss": stoploss,})
-
-                    putZone = False
-                    putReversal = False
-                    callReversal = False
                     DayFirstEntry = True
 
-                if callZone and (df_15Min.at[lastdf15MinIndexTimeData[1], "putSlope"] == "putSlope"):
+                if (df_15Min.at[lastdf15MinIndexTimeData[1], "putEntryTypeOne"] == "putEntryTypeOne"):
 
                     expiryEpoch = self.getCurrentExpiryEpoch(self.timeData, baseSym)
-
                     lotSize = int(getExpiryData(self.timeData, baseSym)["LotSize"])
 
                     try:
-                        callSym = self.getCallSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
+                        callSym = self.getPutSym(self.timeData, baseSym, df.at[lastIndexTimeData[1], "c"], MonthlyExpiry, 0, 100)
                         data = self.fetchAndCacheFnoHistData(callSym, lastIndexTimeData[1],conn=conn)
                     except Exception as e:
                         self.strategyLogger.info(e)
 
                     target = 0.3 * data["c"]
-                    stoploss = 1.5 * data["c"]
-
+                    stoploss = 1.3 * data["c"]
                     self.entryOrder(data["c"], callSym, lotSize, "SELL", {"Expiry": expiryEpoch,"Target": target,"Stoploss": stoploss,})
-
-                    callZone = False
-                    putReversal = False
-                    callReversal = False
                     DayFirstEntry = True
 
         self.pnlCalculator()
@@ -257,7 +232,7 @@ if __name__ == "__main__":
     strategyName = "FutureAndOption"
     version = "v1"
 
-    startDate = datetime(2020, 1, 1, 9, 15)
+    startDate = datetime(2025, 4, 1, 9, 15)
     endDate = datetime(2025, 9, 30, 15, 30)
 
     algo = algoLogic(devName, strategyName, version)

@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import logging
 import talib
+import pandas_ta as ta
 
 
 class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
@@ -45,16 +46,25 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "15Min")
+            df = getFnoBacktestData(stockName, startTimeEpoch-(86400*300), endTimeEpoch, "5Min")
         except Exception as e:
             raise Exception(e)
 
-        df['rsi'] = talib.RSI(df['c'], timeperiod=5)
-        df['longEntry'] = np.where((df['rsi'] > 70), "longEntry", "")
-        df['longExit'] = np.where((df['rsi'] < 30), "longExit", "")
+        df['rsi'] = talib.RSI(df['c'], timeperiod=14)
+        df['maxRsiDiffPrevFive'] = df['rsi'].diff().rolling(window=5).max()
+        df['rsiDiff'] = df['rsi'] - df['rsi'].shift(1)
 
-        df['longreversal'] = np.where((df['rsi'] > 30) & (df['rsi'].shift(1) < 30), "longreversal", "")
-        df['shortreversal'] = np.where((df['rsi'] < 70) & (df['rsi'].shift(1) > 70), "shortreversal", "")
+        results = ta.supertrend(df["h"], df["l"], df["c"], length=10, multiplier=3.0)
+        df["Supertrend"] = results["SUPERTd_10_3.0"]
+        df.dropna(inplace=True)
+
+        df['callBuy'] = np.where(
+            (df['Supertrend'] == -1) &
+            (df['rsi'] > df['rsi'].shift(1)) &
+            (df['rsiDiff'].abs() >= df['maxRsiDiffPrevFive'].abs()),
+            "callBuy", "")
+
+        df['callExit'] = np.where((df['Supertrend'] == 1), "callExit", "")
 
         df.dropna(inplace=True)
         # df.index = df.index + 33300
@@ -87,79 +97,26 @@ class FDRS_Single_Confermation_RSI_5(baseAlgoLogic):
                         if stockAlgoLogic.humanTime.time() >= time(15, 15):
                             exitType = f"Timeup,{row['entryType']}"
                             stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-                            continue
 
                         current_close = df.at[lastIndexTimeData, "c"]
 
                         if row['PositionStatus'] == 1:
-                            if df.at[lastIndexTimeData, "longExit"] == "longExit":
+                            if df.at[lastIndexTimeData, "callExit"] == "callExit":
                                 exitType = f"rsiBuyExit,{row['entryType']}"
-                                stockAlgoLogic.exitOrder(index, exitType, current_close)
-
-                            elif row['entryType'] == "two" and df.at[lastIndexTimeData, "longExit"] == "longExit":
-                                exitType = f"reversallongExit,{row['entryType']}"
                                 stockAlgoLogic.exitOrder(index, exitType, current_close)
 
                             elif (row['EntryPrice'] * 0.997) > current_close:
                                 exitType = f"BuyStopLoss,{row['entryType']}"
                                 stockAlgoLogic.exitOrder(index, exitType, current_close)
 
-                        elif row['PositionStatus'] == -1:
-                            if df.at[lastIndexTimeData, "longEntry"] == "longEntry":
-                                exitType = f"rsiSellExit,{row['entryType']}"
-                                stockAlgoLogic.exitOrder(index, exitType, current_close)
-
-                            elif row['entryType'] == "two" and df.at[lastIndexTimeData, "longEntry"] == "longEntry":
-                                exitType = f"reversalshortExit,{row['entryType']}"
-                                stockAlgoLogic.exitOrder(index, exitType, current_close)
-
-                            elif (row['EntryPrice'] * 1.003) < current_close:
-                                exitType = f"SELLStopLoss,{row['entryType']}"
-                                stockAlgoLogic.exitOrder(index, exitType, current_close)
-
                     except Exception as e:
                         logging.info(e)
 
-            if DayFirstEntry == True and stockAlgoLogic.humanTime.time() >= time(15, 15):
-                DayFirstEntry = False
-
-            if DayFirstEntry == False and (lastIndexTimeData in df.index) & (stockAlgoLogic.humanTime.time() > time(9, 30)) & (stockAlgoLogic.humanTime.time() < time(15, 15)):
-                if stockName == "NIFTY 50":
-                    lotSize = 75
-
-                if (df.at[lastIndexTimeData, "longreversal"] == "longreversal") and (df.at[lastIndexTimeData, "c"] > df.at[lastIndexTimeData, "o"]):
-
-                    if lastIndexTimeData in df.index and not stockAlgoLogic.openPnl.empty:
-                        for index, row in stockAlgoLogic.openPnl.iterrows():
-                            exitType = f"AllExit,{row['entryType']}"
-                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-                    entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "BUY", {"entryType":"two"})
-                    DayFirstEntry = True
-
-                if (df.at[lastIndexTimeData, "shortreversal"] == "shortreversal") and (df.at[lastIndexTimeData, "c"] < df.at[lastIndexTimeData, "o"]):
-
-                    if lastIndexTimeData in df.index and not stockAlgoLogic.openPnl.empty:
-                        for index, row in stockAlgoLogic.openPnl.iterrows():
-                            exitType = f"AllExit,{row['entryType']}"
-                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-                    entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "SELL", {"entryType":"two"})
-                    DayFirstEntry = True
-
             if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() > time(9, 30)) & (stockAlgoLogic.humanTime.time() < time(15, 15)):
-                if stockName == "NIFTY 50":
-                    lotSize = 75
-                elif stockName == "NIFTY BANK":
-                    lotSize = 30
 
-                if (df.at[lastIndexTimeData, "longEntry"] == "longEntry") and (df.at[lastIndexTimeData, "c"] > df.at[lastIndexTimeData, "o"]):
+                if (df.at[lastIndexTimeData, "callBuy"] == "callBuy"):
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "BUY", {"entryType":"one"})
-
-                elif (df.at[lastIndexTimeData, "longExit"] == "longExit") and (df.at[lastIndexTimeData, "c"] < df.at[lastIndexTimeData, "o"]):
-                    entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, lotSize, "SELL", {"entryType":"one"})
+                    stockAlgoLogic.entryOrder(entry_price, stockName, 75, "BUY", {"entryType":"one"})
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()
